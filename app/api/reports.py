@@ -1,8 +1,30 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+# app/api/reports.py
+from typing import Optional
+import os, json, traceback
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Form
+from fastapi.responses import JSONResponse, FileResponse
+
 from app.schemas.reports import TranscribeResponse, Transcript, TranscriptSegment
-from app.services.transcription import transcribe_audio, TranscriptionError, assign_speakers_alternate
-import traceback
+from app.services.transcription import (
+    transcribe_audio,
+    TranscriptionError,
+    assign_speakers_alternate,
+)
+from app.services.notes import (
+    generate_structured_notes,
+    render_markdown,
+    save_markdown,
+    save_pdf_simple,
+    make_report_id,
+)
+from app.models.notes import NotesResponse, MeetingSummary
+
+# ✅ Un SEUL router, avec prefix commun
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+DATA_ROOT = os.getenv("DATA_ROOT", "/data/reports")
+
 
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe_endpoint(
@@ -11,25 +33,29 @@ async def transcribe_endpoint(
     diarization: str = Query(
         default="none",
         pattern="^(none|alternate)$",
-        description="none=pas de speaker; alternate=alternance simple selon pauses"
+        description="none=pas de speaker; alternate=alternance simple selon pauses",
     ),
-    gap_threshold: float = Query(default=1.0, ge=0.2, le=5.0, description="seuil de pause (s) pour alternance"),
+    gap_threshold: float = Query(
+        default=1.0,
+        ge=0.2,
+        le=5.0,
+        description="seuil de pause (s) pour alternance",
+    ),
 ):
-    """
-    Transcrit l'audio en texte + segments.
-    - language_hint: suggestion de langue (facultatif), la détection auto reste active côté modèle.
-    - diarization='alternate': assigne 'Speaker 1/2' en alternant quand il y a une pause > gap_threshold.
-    """
+    
+    lang_hint_clean=(language_hint or "").strip() if language_hint is not None else ""
+    if lang_hint_clean.lower()=="auto":
+        lang_hint_clean=""
     try:
         content = await file.read()
-        text, segs, lang = await transcribe_audio(content, file.filename, language_hint)
+        text, segs, lang = await transcribe_audio(content, file.filename, lang_hint_clean or None)
         if diarization == "alternate":
             segs = assign_speakers_alternate(segs, gap_threshold=gap_threshold, max_speakers=2)
 
         transcript = Transcript(
             language=lang or "unknown",
             text=text or "",
-            segments=[TranscriptSegment(**s) for s in segs]
+            segments=[TranscriptSegment(**s) for s in segs],
         )
         return TranscribeResponse(transcript=transcript)
 
@@ -38,3 +64,91 @@ async def transcribe_endpoint(
     except Exception as e:
         print("TRACE:\n", traceback.format_exc(), flush=True)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+
+
+@router.post("/notes", response_model=NotesResponse)
+async def generate_notes_endpoint(
+    file: Optional[UploadFile] = File(default=None),
+    transcript: Optional[str] = Form(default=None),
+    language_hint: str = Form(default="auto"),
+    diarization: str = Form(default="none"),
+    gap_threshold: float = Form(default=1.0),
+    export_pdf: bool = Form(default=False),
+):
+    """
+    Génèration des notes de réunion 
+    """
+    if not file and not transcript:
+        raise HTTPException(status_code=400, detail="Provide either 'file' or 'transcript'.")
+
+    
+    lang_hint_clean = (language_hint or "").strip()
+    if lang_hint_clean.lower() == "auto":
+        lang_hint_clean = ""
+
+    transcript_text: Optional[str] = None
+    lang: Optional[str] = None  
+
+    if file:
+        content = await file.read()
+        try:
+            text, segs, lang_detected = await transcribe_audio(
+                content,
+                file.filename,
+                lang_hint_clean or None,  
+            )
+            transcript_text = text
+            if lang_detected:
+                lang = lang_detected
+            elif lang_hint_clean:
+                lang = lang_hint_clean
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+    else:
+        try:
+            maybe = json.loads(transcript)
+            transcript_text = maybe.get("text") or transcript
+        except Exception:
+            transcript_text = transcript
+
+        if lang_hint_clean:
+            lang = lang_hint_clean
+
+    if not transcript_text or not transcript_text.strip():
+        raise HTTPException(status_code=400, detail="Transcript is empty.")
+
+    try:
+        summary: MeetingSummary = generate_structured_notes(
+            transcript_text,
+            lang or lang_hint_clean or None,  # au cas où
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Notes generation failed: {e}")
+
+    report_id = make_report_id()
+    out_dir = os.path.join(DATA_ROOT, report_id)
+    md_text = render_markdown(summary, transcript_text)
+    md_path = save_markdown(md_text, out_dir)
+    pdf_path = None
+    if export_pdf:
+        pdf_path = save_pdf_simple(md_text, out_dir)
+
+    md_filename = os.path.basename(md_path)
+    pdf_filename = os.path.basename(pdf_path) if pdf_path else None
+
+    exports = {
+        "markdown_path": md_path,
+        "pdf_path": pdf_path,
+        "markdown_url": f"/reports/files/{report_id}/{md_filename}",
+        "pdf_url": f"/reports/files/{report_id}/{pdf_filename}" if pdf_filename else None,
+    }
+
+    return JSONResponse(
+        content=NotesResponse(
+            report_id=report_id,
+            language=lang or lang_hint_clean or "unknown",
+            transcript_text=transcript_text,
+            summary=summary,
+            exports=exports,
+        ).model_dump()
+    )
