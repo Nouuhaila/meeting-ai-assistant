@@ -1,190 +1,99 @@
-# FastAPI Template
+# Meeting AI Assistant – Report Generator
 
-A production-ready FastAPI template with authentication, async database operations, and Docker support.
+Ce projet permet de générer des **rapports de réunion** à partir de fichiers audio.
 
-## Features
+L’application permet :
 
-- **Modern Python**: Type hints, async/await syntax, and the latest FastAPI features
-- **JWT Authentication**: Complete authentication system with access and refresh tokens
-- **SQLAlchemy with Async**: Fully async database operations using SQLAlchemy 2.0+
-- **Alembic Migrations**: Database schema migrations with Alembic
-- **Role-based Access Control**: User roles with different permission levels (active, staff, superuser)
-- **Docker Support**: Ready-to-use Docker and Docker Compose configurations
-- **Developer-friendly**: Auto-reload, debugging, and development tools
-- **Production-ready**: Configuration for deployment in production environments
+- 📝 **Transcription automatique** de réunions (via OpenAI, modèle ASR)
+- 🧑‍🤝‍🧑 **Segmentation par locuteurs (diarisation simple)** par alternance en fonction des pauses
+- 📊 **Génération de notes structurées** : sujets, décisions, actions
+- 📄 **Export des rapports** au format **Markdown** et **PDF**
+- 💻 **Interface Streamlit** pour tester le flux de bout en bout
 
-## Project Structure
+---
 
-```
-.
-├── alembic/                 # Database migrations
-├── app/                     # Main application package
-│   ├── api/                 # API endpoints
-│   ├── core/                # Core functionality (config, security)
-│   ├── db/                  # Database session and base
-│   ├── models/              # SQLAlchemy models
-│   ├── schemas/             # Pydantic schemas
-│   ├── services/            # Business logic
-│   └── utils/               # Utility functions
-├── docker-compose.yml       # Docker Compose for production
-├── docker-compose.dev.yml   # Docker Compose for development
-├── Dockerfile               # Docker configuration
-├── alambic.ini              # Alembic configuration
-├── main.py                  # Application entry point
-├── pyproject.toml           # Project dependencies and metadata
-├── start.sh                 # Production startup script
-└── start-dev.sh             # Development startup script
-```
+## 1. Stack technique
 
-## Requirements
+- **Backend** : FastAPI (Python 3.11)
+- **Frontend** : Streamlit
+- **Transcription audio** : OpenAI Audio API (modèle `gpt-4o-mini-transcribe` ou Whisper compatible)
+- **Traitement audio** : `pydub` + `ffmpeg`
+- **Génération de résumé** : OpenAI Chat Completions (`gpt-4o-mini`)
+- **Exports** :
+  - Markdown : rendu manuel
+  - PDF : `reportlab` avec un template structuré
+
+---
+
+## 2. Architecture générale
+
+### 2.1. Vue d’ensemble
+
+- `main.py`  
+  Point d’entrée FastAPI (inclusion des routers, CORS, config).
+
+- `app/api/reports.py`  
+  Endpoints pour :
+  - `/reports/transcribe` : transcription pure
+  - `/reports/notes` : génération des notes + fichiers d’export
+  - `/reports/files/{report_id}/{filename}` : téléchargement des fichiers générés
+
+- `app/services/transcription.py`  
+  Logique de transcription audio :
+  - chargement + resampling audio (`pydub`)
+  - découpage en chunks
+  - appel à l’API OpenAI
+  - reconstruction du texte + segments (timestamps)
+
+- `app/services/notes.py`  
+  Génération et export des notes :
+  - `generate_structured_notes()` : prompt + appel OpenAI pour structurer le compte-rendu
+  - `render_markdown()` : construction du Markdown
+  - `generate_pdf_report()` : création d’un PDF “propre” (résumé, sujets, décisions, actions, transcription)
+
+- `app/models/notes.py`  
+  Schemas Pydantic pour :
+  - `MeetingSummary` (executive summary, topics, decisions, actions)
+  - `NotesResponse`
+
+- `app/schemas/reports.py`  
+  Schemas de réponse pour `/reports/transcribe`.
+
+- `streamlit_app.py`  
+ Interface utilisateur :
+  - upload d’un fichier audio
+  - bouton “Transcription”
+  - bouton “Générer les notes”
+  - boutons de téléchargement Markdown / PDF
+
+---
+
+## 3. Installation & configuration
+
+### 3.1. Prérequis
 
 - Python 3.11+
-- Docker (optional)
+- Docker & Docker Compose 
 
-## Installation
+### 3.2. Variables d’environnement
 
-### Using Docker (recommended)
-
-1. Clone the repository:
-   ```bash
-   git clone <your-repo-url>
-   cd fastapi-template
-   ```
-
-2. Start the application with Docker Compose:
-   ```bash
-   # For development
-   docker-compose -f docker-compose.dev.yml up --build
-
-   # For production
-   docker-compose up --build
-   ```
-
-3. The API will be available at http://localhost:8000
-
-### Local Development
-
-1. Clone the repository:
-   ```bash
-   git clone <your-repo-url>
-   cd fastapi-template
-   ```
-
-2. Create and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install dependencies:
-   ```bash
-   pip install -e ".[dev]"
-   ```
-
-4. Set up environment variables (create a `.env` file):
-   ```
-   DEBUG=true
-   SECRET_KEY=your-secret-key
-   DB_ENGINE=sqlite  # or postgresql
-   # For PostgreSQL, add these:
-   # DB_USER=postgres
-   # DB_PASSWORD=password
-   # DB_HOST=localhost
-   # DB_PORT=5432
-   # DB_NAME=app
-   ```
-
-5. Run migrations:
-   ```bash
-   alembic upgrade head
-   ```
-
-6. Start the application:
-   ```bash
-   uvicorn main:app --reload
-   ```
-
-7. The API will be available at http://localhost:8000
-
-## API Documentation
-
-Once the application is running, you can access:
-
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-
-## API Endpoints
-
-### Authentication
-
-- `POST /auth/signup` - Register a new user
-- `POST /auth/login` - Authenticate and get tokens
-- `POST /auth/token/refresh` - Refresh access token
-- `POST /auth/logout` - Logout user
-- `GET /auth/me` - Get current user information
-
-### System
-
-- `GET /health` - Health check endpoint
-
-## Configuration
-
-The application is configured through environment variables which can be set in a `.env` file:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DEBUG` | Enable debug mode | `true` |
-| `SECRET_KEY` | JWT secret key | `supersecretkey` |
-| `ALGORITHM` | JWT algorithm | `HS256` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token expiration time | `60` |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token expiration time | `7` |
-| `CORS_ORIGINS` | CORS allowed origins | `["*"]` |
-| `DB_ENGINE` | Database engine | `sqlite` |
-| `DB_USER` | Database user | `""` |
-| `DB_PASSWORD` | Database password | `""` |
-| `DB_HOST` | Database host | `""` |
-| `DB_PORT` | Database port | `""` |
-| `DB_NAME` | Database name | `app.db` |
-
-## Development
-
-### Running Tests
-
-```bash
-pytest
-```
-
-### Code Quality Tools
-
-The project uses several tools to ensure code quality:
-
-- **Black**: Code formatter
-- **isort**: Import sorter
-- **mypy**: Static type checking
-- **pre-commit**: Git hooks for code quality checks
-
-To set up pre-commit hooks:
-
-```bash
-pre-commit install
-```
-
-## Database
-
-The template supports SQLite for development and PostgreSQL for production. The default is SQLite.
-
-### Migrations
-
-To create a new migration after changing models:
-
-```bash
-alembic revision --autogenerate -m "Description of changes"
-```
-
-To apply migrations:
-
-```bash
-alembic upgrade head
+Créer un fichier `.env` à la racine :
+```env
+DEBUG=true
+SECRET_KEY=secret
+DB_ENGINE=sqlite  # or postgresql
+# For PostgreSQL, add these:
+# DB_USER=postgres
+# DB_PASSWORD=password
+# DB_HOST=localhost
+# DB_PORT=5432
+# DB_NAME=app
+HUGGINGFACE_TOKEN=XXXXXXXXXXXX
+#BACKEND=hf
+OPENAI_API_KEY=sk-XXXXXXXXXXXXXXXX
+BACKEND=openai
+#ASR_MODEL_ID=gpt-4o-mini-transcribe 
+ASR_MODEL_ID=whisper-1
 ```
 
 ## Docker
@@ -193,6 +102,17 @@ The project includes Docker configurations for both development and production:
 
 - `docker-compose.yml`: Production setup
 - `docker-compose.dev.yml`: Development setup with hot-reload
+## 4️. Utilisation
+
+### Lancer le backend FastAPI avec Docker
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+### Lancer l’interface Streamlit
+```
+streamlit run streamlit_app.py
+```
 
 ## Contributing
 
@@ -200,3 +120,5 @@ The project includes Docker configurations for both development and production:
 2. Create a feature branch: `git checkout -b ft/my-feature`
 3. Commit your changes: `git commit -m 'Add my feature'`
 4. Push to the branch: `git push origin ft/my-feature`
+
+
