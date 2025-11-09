@@ -3,211 +3,276 @@ import requests
 
 API_URL = "http://localhost:8000"
 
-st.title("🎙️ Meeting Report Generator")
-
-st.write("Upload un fichier audio pour :")
-st.markdown("- Obtenir la **transcription complète**")
-st.markdown("- Générer des **notes de réunion structurées** (sujets, décisions, actions)")
-
-audio_file = st.file_uploader("Choisir un fichier audio", type=["wav", "mp3", "m4a"])
-
-language_hint = st.text_input(
-    "Indice de langue (optionnel, ex: fr, en — laisser vide pour détection automatique)"
+st.set_page_config(
+    page_title="Meeting Report Generator",
+    layout="wide",
 )
 
-diarization = st.selectbox("Diarisation", ["none", "alternate"])
-gap_threshold = st.slider("Seuil de pause (s)", 0.2, 5.0, 1.0)
+st.title("Meeting Report Generator")
+st.markdown(
+    "Upload a meeting audio file to generate a **full transcript** and a "
+    "**structured meeting report** (objectives, topics, decisions, action items)."
+)
 
-lang_to_send = language_hint.strip()
+with st.sidebar:
+    st.header("Settings")
+
+    language_hint = st.text_input(
+        "Language hint (optional)",
+        placeholder="e.g. en, fr",
+        help="Leave empty to let the model detect the language.",
+    )
+
+    diarization = st.selectbox(
+        "Speaker segmentation",
+        ["none", "alternate"],
+        help="Approximate speaker turns based on pauses in the audio.",
+    )
+
+    gap_threshold = st.slider(
+        "Pause threshold (seconds)",
+        0.2,
+        5.0,
+        1.0,
+        help="If the silence between segments is greater than this, "
+             "we switch to the next speaker (for 'alternate' mode).",
+    )
+
+    max_speakers = st.slider(
+        "Max number of speakers (approx.)",
+        1,
+        8,
+        4,
+        help="Used in the heuristic diarization mode.",
+    )
+
+    export_pdf = st.checkbox("Export structured report as PDF", value=True)
+
+col_left, col_right = st.columns([2, 1])
+
+with col_left:
+    st.subheader("1. Audio upload")
+    audio_file = st.file_uploader(
+        "Select an audio file",
+        type=["wav", "mp3", "m4a"],
+        help="Maximum size depends on your backend configuration.",
+    )
+
+with col_right:
+    st.subheader("Information")
+    st.markdown(
+        """
+        - The transcription uses OpenAI Whisper / GPT models.
+        - The report is generated from the transcript using a custom prompt.
+        - PDFs and Markdown files are generated on the backend server.
+        """
+    )
+
+lang_to_send = language_hint.strip() if language_hint.strip() else "auto"
+
+tabs = st.tabs(["Transcription", "Meeting Report"])
 
 
-st.header("1️⃣ Transcription brute")
+with tabs[0]:
+    st.subheader("Transcription")
 
-if st.button("Transcrire !"):
-    if not audio_file:
-        st.warning("Ajoute d’abord un fichier audio.")
-    else:
-        params = {
-            "diarization": diarization,
-            "gap_threshold": gap_threshold,
-        }
-        if lang_to_send:
-            params["language_hint"] = lang_to_send
+    if st.button("Run transcription", type="primary"):
+        if not audio_file:
+            st.warning("Please upload an audio file first.")
+        else:
+            params = {
+                "diarization": diarization,
+                "gap_threshold": gap_threshold,
+                "max_speakers": max_speakers,
+            }
+            if language_hint:
+                params["language_hint"] = language_hint
 
-        files = {
-            "file": (
-                audio_file.name,
-                audio_file.getvalue(),        # on envoie les bytes
-                audio_file.type or "audio/mpeg",
-            )
-        }
-
-        with st.spinner("Transcription en cours…"):
-            try:
-                res = requests.post(
-                    f"{API_URL}/reports/transcribe",
-                    params=params,
-                    files=files,
-                    timeout=3600,
+            files = {
+                "file": (
+                    audio_file.name,
+                    audio_file.getvalue(),
+                    audio_file.type or "audio/mpeg",
                 )
-            except requests.Timeout:
-                st.error("⏱️ Timeout : le backend met trop de temps à répondre.")
-            except requests.RequestException as e:
-                st.error(f"Erreur réseau: {e}")
-            else:
-                if res.ok:
-                    data = res.json()
-                    transcript = data["transcript"]
-                    st.success(f"Langue détectée : {transcript.get('language', 'inconnue')}")
-                    st.subheader("Texte complet")
-                    st.write(transcript.get("text", ""))
+            }
 
-                    st.subheader("Segments")
-                    for i, s in enumerate(transcript.get("segments", [])):
-                        speaker = s.get("speaker") or ""
-                        st.markdown(
-                            f"**{i+1}. {speaker}** "
-                            f"[{s.get('start',0):.2f}s → {s.get('end',0):.2f}s] : {s.get('text','')}"
-                        )
+            with st.spinner("Transcribing audio..."):
+                try:
+                    res = requests.post(
+                        f"{API_URL}/reports/transcribe",
+                        params=params,
+                        files=files,
+                        timeout=3600,
+                    )
+                except requests.Timeout:
+                    st.error("Timeout: the backend took too long to respond.")
+                except requests.RequestException as e:
+                    st.error(f"Network error: {e}")
                 else:
-                    try:
-                        st.error(res.json().get("detail"))
-                    except Exception:
-                        st.error(f"HTTP {res.status_code}")
-
-
-#  GÉNÉRATION DE NOTES + EXPORTS
-
-st.header("2️⃣ Génération de notes de réunion")
-
-export_pdf = st.checkbox("Exporter aussi en PDF", value=False)
-
-if st.button("Générer les notes à partir de l'audio"):
-    if not audio_file:
-        st.warning("Ajoute d’abord un fichier audio.")
-    else:
-        files = {
-            "file": (
-                audio_file.name,
-                audio_file.getvalue(),
-                audio_file.type or "audio/mpeg",
-            )
-        }
-        # /reports/notes attend des champs de FORM
-        data = {
-            "language_hint": lang_to_send,
-            "diarization": diarization,
-            "gap_threshold": str(gap_threshold),
-            "export_pdf": str(export_pdf).lower(),    # "true" / "false"
-        }
-
-        with st.spinner("Génération des notes en cours…"):
-            try:
-                res = requests.post(
-                    f"{API_URL}/reports/notes",
-                    files=files,
-                    data=data,
-                    timeout=3600,
-                )
-            except requests.Timeout:
-                st.error("⏱️ Timeout : le backend met trop de temps à répondre.")
-            except requests.RequestException as e:
-                st.error(f"Erreur réseau: {e}")
-            else:
-                if not res.ok:
-                    try:
-                        st.error(res.json().get("detail"))
-                    except Exception:
-                        st.error(f"HTTP {res.status_code}")
-                else:
-                    result = res.json()
-
-                    st.success("✅ Notes générées avec succès")
-
-                    st.subheader("Langue détectée")
-                    st.write(result.get("language"))
-
-                    st.subheader("Transcript (aperçu)")
-                    txt = result.get("transcript_text", "")
-                    st.write(txt[:2000] + ("..." if len(txt) > 2000 else ""))
-
-                    summary = result.get("summary", {})
-
-                    st.subheader("🧩 Sujets abordés")
-                    topics = summary.get("topics", [])
-                    if topics:
-                        for t in topics:
-                            title = t.get("title", "")
-                            desc = t.get("description", "")
-                            st.markdown(f"- **{title}** — {desc}")
+                    if not res.ok:
+                        try:
+                            st.error(res.json().get("detail"))
+                        except Exception:
+                            st.error(f"HTTP {res.status_code}")
                     else:
-                        st.write("Aucun sujet détecté.")
+                        data = res.json()
+                        transcript = data["transcript"]
 
-                    st.subheader("✅ Décisions")
-                    decisions = summary.get("decisions", [])
-                    if decisions:
-                        for d in decisions:
-                            # d est un dict venant du JSON de l'API
-                            if isinstance(d, dict):
-                                txt = d.get("decision", "")
-                                due = d.get("due")
-                                if due:
-                                    st.markdown(f"- **{txt}** _(échéance : {due})_")
-                                else:
-                                    st.markdown(f"- {txt}")
-                            else:
+                        st.success(f"Detected language: {transcript.get('language', 'unknown')}")
+                        st.markdown("#### Full text")
+                        st.write(transcript.get("text", ""))
+
+                        st.markdown("#### Segments")
+                        for i, s in enumerate(transcript.get("segments", [])):
+                            speaker = s.get("speaker") or ""
+                            st.markdown(
+                                f"**{i+1}. {speaker}** "
+                                f"[{s.get('start',0):.2f}s → {s.get('end',0):.2f}s]  \n"
+                                f"{s.get('text','')}"
+                            )
+
+
+with tabs[1]:
+    st.subheader("Meeting report")
+
+    if st.button("Generate report from audio", type="primary"):
+        if not audio_file:
+            st.warning("Please upload an audio file first.")
+        else:
+            files = {
+                "file": (
+                    audio_file.name,
+                    audio_file.getvalue(),
+                    audio_file.type or "audio/mpeg",
+                )
+            }
+            data = {
+                "language_hint": lang_to_send,
+                "diarization": diarization,
+                "gap_threshold": str(gap_threshold),
+                "export_pdf": str(export_pdf).lower(),
+            }
+
+            with st.spinner("Generating meeting report..."):
+                try:
+                    res = requests.post(
+                        f"{API_URL}/reports/notes",
+                        files=files,
+                        data=data,
+                        timeout=3600,
+                    )
+                except requests.Timeout:
+                    st.error("Timeout: the backend took too long to respond.")
+                except requests.RequestException as e:
+                    st.error(f"Network error: {e}")
+                else:
+                    if not res.ok:
+                        try:
+                            st.error(res.json().get("detail"))
+                        except Exception:
+                            st.error(f"HTTP {res.status_code}")
+                    else:
+                        result = res.json()
+
+                        st.success("Report generated successfully.")
+
+                        st.markdown("#### Language")
+                        st.write(result.get("language"))
+
+                        st.markdown("#### Summary")
+                        summary = result.get("summary", {})
+                        st.write(summary.get("executive_summary"))
+
+                        st.markdown("#### Objectives")
+                        objectives = summary.get("objectives", [])
+                        if objectives:
+                            for i, obj in enumerate(objectives, start=1):
+                                st.markdown(f"{i}. {obj}")
+                        else:
+                            st.write("No objectives extracted.")
+
+                        st.markdown("#### Topics")
+                        topics = summary.get("topics", [])
+                        if topics:
+                            for t in topics:
+                                title = t.get("title", "")
+                                desc = t.get("description", "")
+                                st.markdown(f"**{title}**")
+                                if desc:
+                                    st.write(desc)
+                        else:
+                            st.write("No topics extracted.")
+
+                        st.markdown("#### Decisions")
+                        decisions = summary.get("decisions", [])
+                        if decisions:
+                            for d in decisions:
                                 st.markdown(f"- {d}")
-                    else:
-                        st.write("Aucune décision extraite.")
+                        else:
+                            st.write("No decisions extracted.")
 
+                        st.markdown("#### Action items")
+                        actions = summary.get("actions", [])
+                        if actions:
+                            for a in actions:
+                                owner = a.get("owner") or "-"
+                                action_txt = a.get("action") or ""
+                                due = a.get("due") or "-"
+                                st.markdown(f"- **{owner}**: {action_txt} _(deadline: {due})_")
+                        else:
+                            st.write("No action items extracted.")
 
-                    st.subheader("📝 Actions à réaliser")
-                    actions = summary.get("actions", [])
-                    if actions:
-                        for a in actions:
-                            st.markdown(f"- {a}")
-                    else:
-                        st.write("Aucune action extraite.")
+                        st.markdown("#### Outcomes")
+                        outcomes = summary.get("outcomes", [])
+                        if outcomes:
+                            for o in outcomes:
+                                st.markdown(f"- {o}")
+                        else:
+                            st.write("No outcomes extracted.")
 
-                    st.subheader("📂 Fichiers exportés")
-                    exports = result.get("exports", {})
+                        st.markdown("#### Next steps")
+                        next_steps = summary.get("next_steps", [])
+                        if next_steps:
+                            for ns in next_steps:
+                                st.markdown(f"- {ns}")
+                        else:
+                            st.write("No next steps extracted.")
 
-                    md_url_rel = exports.get("markdown_url")
-                    pdf_url_rel = exports.get("pdf_url")
+                        # Fichiers exportés (Markdown / PDF)
+                        st.markdown("#### Download exports")
+                        exports = result.get("exports", {})
 
-                    if not md_url_rel and not pdf_url_rel:
-                        st.write("Aucun fichier exporté (markdown_url / pdf_url non fournis par l'API).")
-                        st.json(exports)  
-                    else:
+                        md_url_rel = exports.get("markdown_url")
+                        pdf_url_rel = exports.get("pdf_url")
+
                         if md_url_rel:
                             md_url = f"{API_URL}{md_url_rel}"
                             try:
                                 md_res = requests.get(md_url, timeout=60)
                                 if md_res.ok:
                                     st.download_button(
-                                        "⬇️ Télécharger le Markdown",
+                                        "Download Markdown",
                                         md_res.content,
                                         file_name="meeting-notes.md",
                                         mime="text/markdown",
                                     )
                                 else:
-                                    st.warning("Impossible de récupérer le fichier Markdown.")
+                                    st.warning("Could not fetch Markdown file from backend.")
                             except requests.RequestException as e:
-                                st.error(f"Erreur lors du téléchargement du Markdown : {e}")
+                                st.error(f"Error when downloading Markdown: {e}")
 
-                        #Téléchargement du PDF
                         if pdf_url_rel:
                             pdf_url = f"{API_URL}{pdf_url_rel}"
                             try:
                                 pdf_res = requests.get(pdf_url, timeout=60)
                                 if pdf_res.ok:
                                     st.download_button(
-                                        "⬇️ Télécharger le PDF",
+                                        "Download PDF",
                                         pdf_res.content,
-                                        file_name="meeting-notes.pdf",
+                                        file_name="meeting-report.pdf",
                                         mime="application/pdf",
                                     )
                                 else:
-                                    st.warning("Impossible de récupérer le fichier PDF.")
+                                    st.warning("Could not fetch PDF file from backend.")
                             except requests.RequestException as e:
-                                st.error(f"Erreur lors du téléchargement du PDF : {e}")
+                                st.error(f"Error when downloading PDF: {e}")

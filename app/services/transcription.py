@@ -7,6 +7,7 @@ from openai import OpenAI
 import os
 import httpx
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Any, Tuple, Optional
 
 from app.core.config import settings
 
@@ -220,7 +221,29 @@ async def transcribe_audio(file_bytes: bytes, filename: str, language_hint: str 
         raise TranscriptionError("Set BACKEND=openai to use OpenAI STT.")
     return _openai_transcribe_chunked(file_bytes, filename, language_hint)
 
-def assign_speakers_alternate(
+
+'''async def transcribe_audio_with_advanced_diarization(
+    audio_bytes: bytes,
+    filename: str,
+    language_hint: Optional[str] = None,
+) -> Tuple[str, List[Dict[str, Any]], Optional[str]]:
+    """
+    Transcrit l'audio,Applique la diarisation avancée 
+    Retourne texte + segments enrichis en 'speaker'
+    """
+    text, segs, lang = await transcribe_audio(
+        audio_bytes,
+        filename,
+        language_hint,
+    )
+
+    speaker_segments = diarize_audio_bytes(audio_bytes)
+
+    segs_with_speakers = assign_speakers_by_overlap(segs, speaker_segments)
+
+    return text, segs_with_speakers, lang'''
+
+'''def assign_speakers_alternate(
     segments: List[Dict],
     gap_threshold: float = 1.0,
     max_speakers: int = 2
@@ -240,4 +263,31 @@ def assign_speakers_alternate(
         s2["speaker"] = speakers[current]
         out.append(s2)
         prev_end = end
-    return out
+    return out'''
+def assign_speakers_round_robin(
+    segments: list[dict],
+    gap_threshold: float = 1.0,
+    max_speakers: int = 6,
+) -> list[dict]:
+  
+    if not segments:
+        return segments
+
+    current_speaker_idx = 1
+    prev_end = segments[0].get("end", 0.0)
+
+    segments[0]["speaker"] = f"Speaker {current_speaker_idx}"
+
+    for i in range(1, len(segments)):
+        seg = segments[i]
+        start = float(seg.get("start", prev_end))
+        end = float(seg.get("end", start))
+        gap = max(0.0, start - prev_end)
+
+        if gap >= gap_threshold:
+            current_speaker_idx = (current_speaker_idx % max_speakers) + 1
+
+        seg["speaker"] = f"Speaker {current_speaker_idx}"
+        prev_end = end
+
+    return segments

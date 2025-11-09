@@ -1,10 +1,10 @@
-# app/models/notes.py
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 
 
 class Topic(BaseModel):
     title: str
+    description: Optional[str] = None
     start: Optional[str] = None  # "HH:MM:SS" si disponible
     end: Optional[str] = None
 
@@ -12,19 +12,17 @@ class Topic(BaseModel):
 class ActionItem(BaseModel):
     owner: Optional[str] = None
     action: str
-    due: Optional[str] = None  # ISO date si détectée
-
-
-class DecisionItem(BaseModel):
-    decision: str
-    due: Optional[str] = None  # ISO date si détectée
+    due: Optional[str] = None  
 
 
 class MeetingSummary(BaseModel):
     executive_summary: str = Field(..., description="Résumé clair et concis")
+    objectives: List[str] = []
     topics: List[Topic] = []
-    decisions: List[DecisionItem] = []
+    decisions: List[str] = []
     actions: List[ActionItem] = []
+    outcomes: List[str] = []
+    next_steps: List[str] = []
 
 
 class NotesResponse(BaseModel):
