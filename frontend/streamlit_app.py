@@ -58,15 +58,7 @@ with col_left:
         help="Maximum size depends on your backend configuration.",
     )
 
-with col_right:
-    st.subheader("Information")
-    st.markdown(
-        """
-        - The transcription uses OpenAI Whisper / GPT models.
-        - The report is generated from the transcript using a custom prompt.
-        - PDFs and Markdown files are generated on the backend server.
-        """
-    )
+
 
 lang_to_send = language_hint.strip() if language_hint.strip() else "auto"
 
