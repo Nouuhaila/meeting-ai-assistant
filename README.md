@@ -88,7 +88,7 @@ DB_ENGINE=sqlite  # or postgresql
 # DB_HOST=localhost
 # DB_PORT=5432
 # DB_NAME=app
-HUGGINGFACE_TOKEN=XXXXXXXXXXXX
+#HUGGINGFACE_TOKEN=XXXXXXXXXXXX
 #BACKEND=hf
 OPENAI_API_KEY=sk-XXXXXXXXXXXXXXXX
 BACKEND=openai
@@ -121,4 +121,18 @@ streamlit run streamlit_app.py
 3. Commit your changes: `git commit -m 'Add my feature'`
 4. Push to the branch: `git push origin ft/my-feature`
 
+## Aperçu du projet
 
+Voici quelques captures d’écran illustrant le fonctionnement de l’application :
+
+### 🔹 Interface Streamlit – Transcription Audio
+![Interface Streamlit](images/Capture%20d’écran%202025-11-10%20051133.png)
+
+### 🔹 Résumé Structuré du Rapport (PDF)
+![Résumé Structuré](images/Capture%20d’écran%202025-11-10%20060301.png)
+
+### 🔹 Détails du Rapport (Décisions, Actions, Transcript)
+![Rapport détaillé](images/Capture%20d’écran%202025-11-10%20060416.png)
+
+### 🔹 Détails du Markdown (Décisions, Actions, Transcript)
+![Rapport détaillé](images/Capture%20d’écran%202025-11-10%071010.png)
