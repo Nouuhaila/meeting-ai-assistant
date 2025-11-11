@@ -135,4 +135,4 @@ Voici quelques captures d’écran illustrant le fonctionnement de l’applicati
 ![Rapport détaillé](images/Capture%20d’écran%202025-11-10%20060416.png)
 
 ### 🔹 Détails du Markdown (Décisions, Actions, Transcript)
-![Rapport détaillé](images/Capture%20d’écran%202025-11-10%071010.png)
+![Rapport détaillé](images/Capture%20d’écran%202025-11-10%20071010.png)
